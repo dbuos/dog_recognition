@@ -1,0 +1,7 @@
+data
+mlruns
+mlflow_artifacts
+logs
+saved_models
+features_ext_vit
+mlflow.sqlite
