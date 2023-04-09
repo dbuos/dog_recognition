@@ -5,3 +5,22 @@ logs
 saved_models
 features_ext_vit
 mlflow.sqlite
+feat_extracted
+features_ext_vit_2
+features_ext_vit_laion
+mlflow_models/
+samples
+collected
+flagged
+lightning_logs
+drecg.egg-info
+model_scripted.*
+model_scripted_*
+*.csv
+.ipynb_checkpoints/
+.idea/
+.uuid
+#Ignore pycache and compiled python files
+__pycache__
+*.py[cod]
+checkpoints

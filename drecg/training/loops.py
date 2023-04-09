@@ -1,10 +1,10 @@
-
 import torch
 from torch import nn
 from torch.optim import Adam
 from tqdm.auto import tqdm
 import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
+
 
 class SanityCallback(pl.Callback):
     def on_sanity_check_start(self, _trainer, pl_module) -> None:
@@ -13,12 +13,14 @@ class SanityCallback(pl.Callback):
     def on_sanity_check_end(self, _trainer, pl_module) -> None:
         pl_module.on_sanity = False
 
+
 def train_lightning(lit_model, dataloader, val_dataloader, test_dl, epochs=10):
     tb_logger = pl_loggers.TensorBoardLogger(save_dir="logs/")
     trainer = pl.Trainer(max_epochs=epochs, accelerator='gpu', logger=tb_logger, callbacks=[SanityCallback()])
     trainer.fit(lit_model, train_dataloaders=dataloader, val_dataloaders=val_dataloader)
     trainer.test(dataloaders=test_dl)
     return trainer
+
 
 def train_full(model, dataloader, device, epochs=10):
     dl_len = len(dataloader)
@@ -27,7 +29,7 @@ def train_full(model, dataloader, device, epochs=10):
     optimizer = Adam(model.parameters())
     loss_fn = nn.BCEWithLogitsLoss()
 
-    progress_bar = tqdm(range(epochs*dl_len))
+    progress_bar = tqdm(range(epochs * dl_len))
 
     hist_loss = []
     hist_acc = []
@@ -47,7 +49,7 @@ def train_full(model, dataloader, device, epochs=10):
             loss = loss_fn(y_pred, label_batch)
             loss.backward()
             optimizer.step()
-            
+
             y_preds = torch.round(torch.sigmoid(y_pred))
             acc = (y_preds == label_batch).sum().item() / len(label_batch)
             epoch_acc += acc
@@ -60,6 +62,7 @@ def train_full(model, dataloader, device, epochs=10):
 
     return hist_loss, hist_acc
 
+
 def train(model, dataloader_same, dataloader_diff, device, epochs=10):
     same_len = len(dataloader_same)
     diff_len = len(dataloader_diff)
@@ -68,9 +71,8 @@ def train(model, dataloader_same, dataloader_diff, device, epochs=10):
     optimizer = Adam(model.parameters())
     loss_fn = nn.BCEWithLogitsLoss()
 
-    progress_bar = tqdm(range(epochs*same_len))
+    progress_bar = tqdm(range(epochs * same_len))
 
-    
     if same_len != diff_len:
         raise ValueError('Dataloaders should have the same length')
 
@@ -100,5 +102,3 @@ def train(model, dataloader_same, dataloader_diff, device, epochs=10):
             progress_bar.update(1)
 
         print(f'Epoch {epoch}: {epoch_loss / same_len}')
-
-
