@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 
 from tqdm.auto import tqdm
 import torch
@@ -44,13 +45,42 @@ class VitLaionPreProcess(torch.nn.Module):
 class VitLaionFeatureExtractor(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.vit_model = AutoModel.from_pretrained("laion/CLIP-ViT-bigG-14-laion2B-39B-b160k")
+        vit_model = AutoModel.from_pretrained("laion/CLIP-ViT-bigG-14-laion2B-39B-b160k")
+        self.config = vit_model.config
         self.transforms = VitLaionPreProcess()
+        self.vision_model = vit_model.vision_model
+        self.visual_projection = vit_model.visual_projection
 
     def forward(self, x):
         img_a, img_b = x
-        return self.vit_model.get_image_features(pixel_values=img_a), self.vit_model.get_image_features(
+        return self.get_image_features(pixel_values=img_a), self.get_image_features(
             pixel_values=img_b)
+
+    def get_image_features(
+            self,
+            pixel_values: Optional[torch.FloatTensor] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
+    ) -> torch.FloatTensor:
+        # Use CLIP model's config for some fields (if specified) instead of those of vision & text components.
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        vision_outputs = self.vision_model(
+            pixel_values=pixel_values,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        pooled_output = vision_outputs[1]  # pooled_output
+        image_features = self.visual_projection(pooled_output)
+
+        return image_features
 
 
 class VitFeatureExtractorComplete(VitLaionFeatureExtractor):
@@ -150,10 +180,3 @@ def extract_features_with_model(model='ViT_L_16', root_dir='features_ext_vit'):
 
     features = extract_features(train_augmented_dataloader, feat_extractor, device=device)
     torch.save(features, f'{root_dir}/train_features_augmented_p1.pt')
-
-
-
-
-
-
-

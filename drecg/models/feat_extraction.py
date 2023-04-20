@@ -12,7 +12,6 @@ from mlflow import log_metric
 from statistics import mean
 
 
-
 class VitFeatureExtractorCore(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -53,6 +52,7 @@ class VitFeatureExtractor(torch.nn.Module):
 
     def reverse_preprocess(self, x):
         return self.extractor.reverse_preprocess(x)
+
 
 # import pytorch_lightning as pl
 # class LFullModel(pl.LightningModule):
@@ -182,12 +182,14 @@ class DiffFeatureDetector(torch.nn.Module):
 class DiffFeatureDetectorParam(torch.nn.Module):
 
     def __init__(self, features_dim=1024, num_hidden=1, hidden_units=128, features_dropout=0.35, hidden_dropout=0.5,
-                 hidden_act='relu'):
+                 hidden_act='relu', layer_norm=False):
         super().__init__()
         self.cls_layer = nn.Sequential()
         self.cls_layer.add_module('features_dropout', nn.Dropout(features_dropout))
         for i in range(num_hidden):
             self.cls_layer.add_module(f'linear_{i}', nn.Linear(features_dim, hidden_units))
+            if layer_norm:
+                self.cls_layer.add_module(f'layer_norm_{i}', nn.LayerNorm(hidden_units))
             if hidden_act == 'relu':
                 self.cls_layer.add_module(f'relu_{i}', nn.ReLU())
             else:
@@ -215,14 +217,55 @@ class DiffFeatureDetectorParamBiDirectional(DiffFeatureDetectorParam):
         return (self.cls_layer(features) + self.cls_layer(features2)) / 2.0
 
 
-class SubModule(torch.nn.Module):
-    def forward(self, a, b):
-        return a - b
+class AttentionBasedBiDirectionalDetector(DiffFeatureDetectorParam):
+
+    def __init__(self, features_dim=1664, num_hidden=2, hidden_units=128, features_dropout=0.35, hidden_dropout=0.35,
+                 hidden_act='relu', attention_heads=8, attention_dropout=0.1, layer_norm=False):
+        super().__init__(features_dim, num_hidden, hidden_units, features_dropout, hidden_dropout, hidden_act,
+                         layer_norm=layer_norm)
+        self.attn0 = nn.MultiheadAttention(embed_dim=1664, num_heads=attention_heads, dropout=attention_dropout,
+                                           batch_first=True)
+
+    def forward(self, x: Tuple[torch.Tensor, torch.Tensor]):
+        features_a, features_b = x
+
+        b_from_a = self.attn0(features_a, features_b, features_b, need_weights=False)[0]
+        b_from_a = torch.max(b_from_a, dim=1)[0]
+
+        a_from_b = self.attn0(features_b, features_a, features_a, need_weights=False)[0]
+        a_from_b = torch.max(a_from_b, dim=1)[0]
+
+        features0 = b_from_a - a_from_b
+        features1 = a_from_b - b_from_a
+
+        return (self.cls_layer(features0) + self.cls_layer(features1)) / 2.0
 
 
-class CatModule(torch.nn.Module):
-    def forward(self, a, b):
-        return torch.cat((a, b), dim=1)
+class AttentionConcatBasedDetector(DiffFeatureDetectorParam):
+
+    def __init__(self, features_dim=1664, num_hidden=2, hidden_units=128, features_dropout=0.35, hidden_dropout=0.35,
+                 hidden_act='relu', attention_heads=8, attention_dropout=0.1, layer_norm=False):
+        super().__init__(256, num_hidden, hidden_units, features_dropout, hidden_dropout, hidden_act,
+                         layer_norm=layer_norm)
+        self.projection = nn.Linear(1664, 256)
+        self.attn0 = nn.MultiheadAttention(embed_dim=256, num_heads=attention_heads, dropout=attention_dropout,
+                                           batch_first=True)
+
+    def forward(self, x: Tuple[torch.Tensor, torch.Tensor]):
+        features_a, features_b = x
+        features_a = self.projection(features_a)
+        features_b = self.projection(features_b)
+
+        b_from_a = self.attn0(features_a, features_b, features_b, need_weights=False)[0]
+        b_from_a = torch.max(b_from_a, dim=1)[0]
+
+        a_from_b = self.attn0(features_b, features_a, features_a, need_weights=False)[0]
+        a_from_b = torch.max(a_from_b, dim=1)[0]
+
+        features0 = b_from_a - a_from_b
+        features1 = a_from_b - b_from_a
+
+        return (self.cls_layer(features0) + self.cls_layer(features1)) / 2.0
 
 
 class ProjectionReductionFeatureDetector(torch.nn.Module):
@@ -261,7 +304,6 @@ class ProjectionReductionFeatureDetector(torch.nn.Module):
         logits_0 = self.cls_layer(features_0)
         logits_1 = self.cls_layer(features_1)
         return (logits_0 + logits_1) / 2.0
-
 
 # def create_lit_fmodel():
 #     return LFullModel(ConcatFeatureDetector())

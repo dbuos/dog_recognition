@@ -1,4 +1,5 @@
 from ignite.engine import Events
+from functools import partial
 from ignite.handlers import EarlyStopping
 from ignite.metrics import Accuracy, Loss, Average
 from ignite.engine import create_supervised_trainer, create_supervised_evaluator
@@ -8,7 +9,7 @@ from optuna.integration import PyTorchIgnitePruningHandler
 
 from drecg.data.utils import create_vector_repr_dataloaders
 from drecg.models.feat_extraction import DiffFeatureDetectorParamBiDirectional, ProjectionReductionFeatureDetector, \
-    DiffFeatureDetectorParam
+    DiffFeatureDetectorParam, AttentionBasedBiDirectionalDetector
 from drecg.utils import seed_everything
 from torch import optim
 import torch
@@ -27,12 +28,13 @@ def define_model_for_trial(trial, model_arch='diff_feature_detector'):
                                                       features_dim=trial.suggest_categorical("feature_dim", [256]))
         return model
     elif model_arch == 'attention_hidden_states':
-        model = DiffFeatureDetectorParam(num_hidden=trial.suggest_int("num_hidden", 1, 4),
-                                         hidden_units=trial.suggest_int("hidden_units", 16, 256),
-                                         features_dropout=trial.suggest_float("features_dropout", 0.2, 0.7),
-                                         hidden_dropout=trial.suggest_float("hidden_dropout", 0.2, 0.7),
-                                         hidden_act=trial.suggest_categorical("hidden_act", ["relu"]),
-                                         features_dim=trial.suggest_categorical("feature_dim", [256]))
+        model = AttentionBasedBiDirectionalDetector(num_hidden=trial.suggest_int("num_hidden", 1, 4),
+                                                    hidden_units=trial.suggest_int("hidden_units", 64, 256),
+                                                    features_dropout=trial.suggest_float("features_dropout", 0.2, 0.7),
+                                                    hidden_dropout=trial.suggest_float("hidden_dropout", 0.2, 0.7),
+                                                    hidden_act=trial.suggest_categorical("hidden_act", ["relu"]),
+                                                    features_dim=trial.suggest_categorical("feature_dim", [1664]),
+                                                    attention_heads=trial.suggest_categorical("attention_heads", [8]))
         return model
     elif model_arch == 'projection_reduction':
         model = ProjectionReductionFeatureDetector(num_hidden=trial.suggest_int("num_hidden", 1, 3),
@@ -103,13 +105,26 @@ def log_model_in_registry(model):
 
 
 def train(trial, max_epochs):
-    train_dataloader, validation_dataloader, test_dataloader = \
-        create_vector_repr_dataloaders(root_dir=trial.suggest_categorical("features_dir", ["feat_extracted/uform_v1"]),
-                                       batch_size=trial.suggest_int("batch_size", 32, 64, step=32), bidirectional=False)
-
-    model = define_model_for_trial(trial, model_arch=trial.suggest_categorical("model_arch", ["diff_feature_detector"]))
+    model_arch = trial.suggest_categorical("model_arch", ["attention_hidden_states"])
+    features_dir = trial.suggest_categorical("features_dir", ["/home/daniel/data_dogs/vit_features_hdf5"])
+    batch_size = trial.suggest_categorical("batch_size", [32])
     lr = trial.suggest_float("lr", 1e-5, 5e-4, log=True)
     optimizer_name = trial.suggest_categorical("optimizer", ["AdamW"])
+
+    pruning_handler = partial(PyTorchIgnitePruningHandler, trial=trial, metric_name="loss")
+    model = define_model_for_trial(trial, model_arch=model_arch)
+    seed = 42
+
+    log_params(trial)
+
+    return train_features_model(model, max_epochs, features_dir, batch_size, lr, optimizer_name, seed, pruning_handler)
+
+
+def train_features_model(model, max_epochs, features_dir, batch_size, lr, optimizer_name, seed, pruning_handler=None,
+                         early_stopping_patience=20):
+    train_dataloader, validation_dataloader, test_dataloader = \
+        create_vector_repr_dataloaders(root_dir=features_dir, batch_size=batch_size, bidirectional=False)
+
     optimizer = getattr(optim, optimizer_name)(model.parameters(), lr=lr)
     scheduler = ReduceLROnPlateau(optimizer, factor=0.5, patience=5, verbose=False)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -159,10 +174,10 @@ def train(trial, max_epochs):
     val_evaluator = create_evaluator()
     test_evaluator = create_evaluator()
 
-    pruning_handler = PyTorchIgnitePruningHandler(trial, "loss", trainer)
-    val_evaluator.add_event_handler(Events.COMPLETED, pruning_handler)
+    if pruning_handler is not None:
+        val_evaluator.add_event_handler(Events.COMPLETED, pruning_handler(trainer=trainer))
 
-    es_handler = EarlyStopping(patience=20, score_function=score_function, trainer=trainer)
+    es_handler = EarlyStopping(patience=early_stopping_patience, score_function=score_function, trainer=trainer)
     val_evaluator.add_event_handler(Events.COMPLETED, es_handler)
 
     def do_execute_test(epoch):
@@ -196,7 +211,6 @@ def train(trial, max_epochs):
         model.load_state_dict(engine.state.best_weights)
         log_model_in_registry(model)
 
-    log_params(trial)
-    seed_everything(42)
+    seed_everything(seed)
     trainer.run(train_dataloader, max_epochs=max_epochs)
     return trainer.state.best_valid_loss

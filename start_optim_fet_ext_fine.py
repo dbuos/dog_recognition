@@ -2,6 +2,7 @@ import optuna
 from optuna.trial import TrialState
 import mlflow
 from drecg.training.ignite import train as train_ignite
+from drecg.utils import create_mlflow_experiment
 
 EPOCHS = 100
 
@@ -15,20 +16,8 @@ def create_objective():
     return objective
 
 
-def create_mlflow_experiment():
-    exp_name = 'Uform Features'
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
-    exp = mlflow.get_experiment_by_name(exp_name)
-    if not exp:
-        mlflow.create_experiment(
-            exp_name,
-            tags={"version": "v1", "type": "uform_features_diff"},
-        )
-    mlflow.set_experiment(exp_name)
-
-
 if __name__ == "__main__":
-    create_mlflow_experiment()
+    create_mlflow_experiment('Attention Based Detector')
     pruner = optuna.pruners.NopPruner()
     study = optuna.create_study(direction="minimize", pruner=pruner)
     opt_objective = create_objective()

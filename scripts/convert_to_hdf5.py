@@ -15,3 +15,4 @@ if __name__ == '__main__':
     convert_to_hdf5(source_files=val_files, dest_path=f"{dst_folder}/validation_features.hdf5")
     convert_to_hdf5(source_files=train_files, dest_path=f"{dst_folder}/train_features.hdf5")
     convert_to_hdf5(source_files=train_augmented_files, dest_path=f"{dst_folder}/train_features_augmented.hdf5")
+    print("Done")
