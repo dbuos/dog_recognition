@@ -1,5 +1,5 @@
 from typing import Optional
-from transformers.models.clip.modeling_clip import CLIPVisionTransformer
+from transformers.models.clip.modeling_clip import CLIPVisionTransformer, CLIPEncoderLayer
 from torch import nn
 import torch
 from transformers.models.clip.configuration_clip import CLIPVisionConfig
@@ -62,6 +62,7 @@ class VitImageFeatureExtractor(nn.Module, PyTorchModelHubMixin):
     def load_pretrained(cls, name="dbuos/ViT-bigG-14-laion2B-39B-b160k"):
         return cls.from_pretrained(name)
 
+
 # model_to_hub = VitImageFeatureExtractor()
 # model_to_hub.visual_projection =   other_model.feature_extractor.visual_projection
 # model_to_hub.vision_model =        other_model.feature_extractor.vision_model
@@ -76,6 +77,7 @@ from typing import Optional, Union, Tuple
 from transformers.models.clip.modeling_clip import CLIPVisionConfig, CLIPEncoder
 from torch import nn
 
+
 class CLIPVisionTransformer(nn.Module):
     def __init__(self, config: CLIPVisionConfig, embeddings, pre_layrnorm):
         super().__init__()
@@ -87,7 +89,7 @@ class CLIPVisionTransformer(nn.Module):
         self.encoder = CLIPEncoder(config)
         self.post_layernorm = nn.LayerNorm(embed_dim, eps=config.layer_norm_eps)
 
-    def forward(self,pixel_values: torch.FloatTensor) -> torch.FloatTensor:
+    def forward(self, pixel_values: torch.FloatTensor) -> torch.FloatTensor:
         hidden_states = self.embeddings(pixel_values)
         hidden_states = self.pre_layrnorm(hidden_states)
 
@@ -103,40 +105,18 @@ class CLIPVisionTransformer(nn.Module):
 
         return pooled_output
 
-class CLIPEncoder(nn.Module):
-    """
-    Transformer encoder consisting of `config.num_hidden_layers` self attention layers. Each layer is a
-    [`CLIPEncoderLayer`].
 
-    Args:
-        config: CLIPConfig
-    """
+def encoder_as_sequential(module_list):
+    layer_list = [EncoderLayerSimple(layer) for layer in module_list]
+    clip_encoder = nn.Sequential(*layer_list)
 
-    def __init__(self, config: CLIPConfig):
+
+class EncoderLayerSimple(nn.Module):
+    def __init__(self, layer):
         super().__init__()
-        self.config = config
-        self.layers = nn.ModuleList([CLIPEncoderLayer(config) for _ in range(config.num_hidden_layers)])
-        self.gradient_checkpointing = False
+        self.enc_layer = layer
 
-    def forward(
-        self,
-        inputs_embeds,
-        attention_mask: Optional[torch.Tensor] = None,
-        causal_attention_mask: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-    ) -> Union[Tuple, BaseModelOutput]:
-
-
-
-        hidden_states = inputs_embeds
-        for idx, encoder_layer in enumerate(self.layers):
-            layer_outputs = encoder_layer(
-                hidden_states,
-                attention_mask,
-                causal_attention_mask,
-                output_attentions=output_attentions,
-            )
-
-            hidden_states = layer_outputs[0]
-
-        return (hidden_states,)
+    def forward(self, hidden_states: torch.Tensor) -> torch.FloatTensor:
+        layer_outputs = self.enc_layer(hidden_states, None, None, output_attentions=False)
+        hidden_states = layer_outputs[0]
+        return hidden_states
