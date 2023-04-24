@@ -1,9 +1,35 @@
 from typing import Optional
-from transformers.models.clip.modeling_clip import CLIPVisionTransformer, CLIPEncoderLayer
+
+from transformers.models.clip.configuration_clip import CLIPVisionConfig
+from transformers.models.clip.modeling_clip import CLIPVisionTransformer
 from torch import nn
 import torch
-from transformers.models.clip.configuration_clip import CLIPVisionConfig
 from huggingface_hub import PyTorchModelHubMixin
+
+
+class EncoderLayerSimple(nn.Module):
+    def __init__(self, layer):
+        super().__init__()
+        self.enc_layer = layer
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.FloatTensor:
+        layer_outputs = self.enc_layer(hidden_states, None, None, output_attentions=False)
+        hidden_states = layer_outputs[0]
+        return hidden_states
+
+
+def encoder_as_list(module_list):
+    layer_list = [EncoderLayerSimple(layer) for layer in module_list]
+    return layer_list
+
+class EncoderPostLayer(nn.Module):
+    def __init__(self, post_layernorm):
+        super().__init__()
+        self.post_layernorm = post_layernorm
+
+    def forward(self, last_hidden_state):
+        pooled_output = last_hidden_state[:, 0, :]
+        return self.post_layernorm(pooled_output)
 
 
 class VitImageFeatureExtractor(nn.Module, PyTorchModelHubMixin):
@@ -62,6 +88,32 @@ class VitImageFeatureExtractor(nn.Module, PyTorchModelHubMixin):
     def load_pretrained(cls, name="dbuos/ViT-bigG-14-laion2B-39B-b160k"):
         return cls.from_pretrained(name)
 
+    def to_sequential(self):
+        """Converts the model to a sequential model in order to use in Pipeline parallelism"""
+        modules_list = []
+
+        emb_and_pre_layrnorm = nn.Sequential(self.vision_model.embeddings, self.vision_model.pre_layrnorm)
+        modules_list.append(emb_and_pre_layrnorm)
+
+        encoder_modules = encoder_as_list(self.vision_model.encoder.layers)
+        modules_list.extend(encoder_modules)
+
+        encoder_post_layer = EncoderPostLayer(self.vision_model.post_layernorm)
+        modules_list.append(encoder_post_layer)
+
+        modules_list.append(self.visual_projection)
+
+        return nn.Sequential(*modules_list)
+
+
+def sequential_model_to_devices(model, device0, device1):
+    device0_layers = len(model) // 2
+    for i, module in enumerate(model):
+        if i < device0_layers:
+            module.to(device0)
+        else:
+            module.to(device1)
+
 
 # model_to_hub = VitImageFeatureExtractor()
 # model_to_hub.visual_projection =   other_model.feature_extractor.visual_projection
@@ -69,54 +121,3 @@ class VitImageFeatureExtractor(nn.Module, PyTorchModelHubMixin):
 # model_to_hub.push_to_hub("ViT-bigG-14-laion2B-39B-b160k")
 # model_from_hub = VitImageFeatureExtractor.from_pretrained("dbuos/ViT-bigG-14-laion2B-39B-b160k")
 
-
-###########
-from transformers.modeling_outputs import BaseModelOutputWithPooling, BaseModelOutput
-import torch
-from typing import Optional, Union, Tuple
-from transformers.models.clip.modeling_clip import CLIPVisionConfig, CLIPEncoder
-from torch import nn
-
-
-class CLIPVisionTransformer(nn.Module):
-    def __init__(self, config: CLIPVisionConfig, embeddings, pre_layrnorm):
-        super().__init__()
-        self.config = config
-        embed_dim = config.hidden_size
-
-        self.embeddings = embeddings
-        self.pre_layrnorm = pre_layrnorm
-        self.encoder = CLIPEncoder(config)
-        self.post_layernorm = nn.LayerNorm(embed_dim, eps=config.layer_norm_eps)
-
-    def forward(self, pixel_values: torch.FloatTensor) -> torch.FloatTensor:
-        hidden_states = self.embeddings(pixel_values)
-        hidden_states = self.pre_layrnorm(hidden_states)
-
-        encoder_outputs = self.encoder(
-            inputs_embeds=hidden_states,
-            output_attentions=False,
-            output_hidden_states=False,
-            return_dict=True,
-        )
-        last_hidden_state = encoder_outputs[0]
-        pooled_output = last_hidden_state[:, 0, :]
-        pooled_output = self.post_layernorm(pooled_output)
-
-        return pooled_output
-
-
-def encoder_as_sequential(module_list):
-    layer_list = [EncoderLayerSimple(layer) for layer in module_list]
-    clip_encoder = nn.Sequential(*layer_list)
-
-
-class EncoderLayerSimple(nn.Module):
-    def __init__(self, layer):
-        super().__init__()
-        self.enc_layer = layer
-
-    def forward(self, hidden_states: torch.Tensor) -> torch.FloatTensor:
-        layer_outputs = self.enc_layer(hidden_states, None, None, output_attentions=False)
-        hidden_states = layer_outputs[0]
-        return hidden_states
