@@ -106,13 +106,17 @@ class VitImageFeatureExtractor(nn.Module, PyTorchModelHubMixin):
         return nn.Sequential(*modules_list)
 
 
-def sequential_model_to_devices(model, device0, device1):
-    device0_layers = len(model) // 2
+def sequential_model_to_devices(model, device0, device1, device2, device3):
+    device0_layers = len(model) // 4
     for i, module in enumerate(model):
         if i < device0_layers:
             module.to(device0)
-        else:
+        elif i < device0_layers*2:
             module.to(device1)
+        elif i < device0_layers*3:
+            module.to(device2)
+        else:
+            module.to(device3)
 
 
 # model_to_hub = VitImageFeatureExtractor()
