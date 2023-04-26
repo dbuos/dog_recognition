@@ -143,6 +143,8 @@ def define_model_for_tune(devices, microbatch_num=1):
         def forward(self, x):
             img_a, img_b = x
             features_a, features_b = self.feature_extractor(img_a), self.feature_extractor(img_b)
+            features_a = features_a.local_value()
+            features_b = features_b.local_value()
             return self.head((features_a, features_b))
 
     return CompleteModel(head_model, feat_extractor)
