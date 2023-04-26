@@ -4,6 +4,8 @@ from transformers.models.clip.configuration_clip import CLIPVisionConfig
 from transformers.models.clip.modeling_clip import CLIPVisionTransformer
 from torch import nn
 import torch
+import pickle
+from torch.distributed.pipeline.sync import Pipe
 from huggingface_hub import PyTorchModelHubMixin
 
 
@@ -21,6 +23,7 @@ class EncoderLayerSimple(nn.Module):
 def encoder_as_list(module_list):
     layer_list = [EncoderLayerSimple(layer) for layer in module_list]
     return layer_list
+
 
 class EncoderPostLayer(nn.Module):
     def __init__(self, post_layernorm):
@@ -106,22 +109,46 @@ class VitImageFeatureExtractor(nn.Module, PyTorchModelHubMixin):
         return nn.Sequential(*modules_list)
 
 
-def sequential_model_to_devices(model, device0, device1, device2, device3):
-    device0_layers = len(model) // 4
-    for i, module in enumerate(model):
-        if i < device0_layers:
-            module.to(device0)
-        elif i < device0_layers*2:
-            module.to(device1)
-        elif i < device0_layers*3:
-            module.to(device2)
-        else:
-            module.to(device3)
+def sequential_model_to_devices(model, devices_list):
+    num_devices = len(devices_list)
+    layers_per_device = len(model) // num_devices
 
+    for i, module in enumerate(model):
+        device_index = i // layers_per_device
+        if device_index >= num_devices:  # Handles the case when len(model) is not divisible by num_devices
+            device_index = num_devices - 1
+
+        module.to(devices_list[device_index])
+
+
+def define_model_for_tune(devices, microbatch_num=1):
+    pickle_filename = "finetune_heads/laion_balanced_1.pkl"
+    # Load the head model
+    with open(pickle_filename, 'rb') as f:
+        head_model = pickle.load(f)
+
+    feat_extractor = VitImageFeatureExtractor.load_pretrained()
+    feat_extractor = feat_extractor.to_sequential()
+
+    sequential_model_to_devices(feat_extractor, devices)
+    feat_extractor = Pipe(feat_extractor, chunks=microbatch_num)
+    head_model.to(devices[-1])  # Put the head model in the last device
+
+    class CompleteModel(torch.nn.Module):
+        def __init__(self, head, f_extractor):
+            super().__init__()
+            self.head = head
+            self.feature_extractor = f_extractor
+
+        def forward(self, x):
+            img_a, img_b = x
+            features_a, features_b = self.feature_extractor(img_a), self.feature_extractor(img_b)
+            return self.head((features_a, features_b))
+
+    return CompleteModel(head_model, feat_extractor)
 
 # model_to_hub = VitImageFeatureExtractor()
 # model_to_hub.visual_projection =   other_model.feature_extractor.visual_projection
 # model_to_hub.vision_model =        other_model.feature_extractor.vision_model
 # model_to_hub.push_to_hub("ViT-bigG-14-laion2B-39B-b160k")
 # model_from_hub = VitImageFeatureExtractor.from_pretrained("dbuos/ViT-bigG-14-laion2B-39B-b160k")
-
