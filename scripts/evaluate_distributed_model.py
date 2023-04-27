@@ -29,13 +29,14 @@ def output_transform_fn(_x, y, y_pred, loss=torch.tensor(1.0)):
 
 
 def prepare_batch_fn(batch, device, non_blocking):
+    y_device = torch.device('cuda:3')
     (img_a_batch, img_b_batch), label_batch, _paths = batch
     label_batch = label_batch.reshape(-1, 1).to(torch.float32)
 
     return (
         (convert_tensor(img_a_batch, device=device, non_blocking=non_blocking),
          convert_tensor(img_b_batch, device=device, non_blocking=non_blocking)),
-        convert_tensor(label_batch, device=device, non_blocking=non_blocking),
+        convert_tensor(label_batch, device=y_device, non_blocking=non_blocking),
     )
 
 
