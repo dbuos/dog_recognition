@@ -7,6 +7,8 @@ from drecg.feature_extraction.utils import VitLaionPreProcess
 from drecg.utils import seed_everything
 import torch
 from ignite.contrib.handlers.tqdm_logger import ProgressBar
+from torch.distributed.rpc import init_rpc
+import os
 
 
 def get_devices():
@@ -81,4 +83,7 @@ def run_eval():
 
 
 if __name__ == '__main__':
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '29500'
+    init_rpc('worker', rank=0, world_size=1)
     run_eval()
