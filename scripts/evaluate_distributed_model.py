@@ -48,7 +48,7 @@ def run_eval():
     transforms = VitLaionPreProcess()
     # train_dataloader = create_dataloader_train(transforms=transforms, batch_size=16)
     # test_dataloader = create_dataloader_test(transforms=transforms, batch_size=16)
-    validation_dataloader = create_dataloader_validation(transforms=transforms, batch_size=16)
+    validation_dataloader = create_dataloader_validation(root='/home/ubuntu/validation', transforms=transforms, batch_size=16)
 
     loss_fn = torch.nn.BCEWithLogitsLoss()
     p_bar = ProgressBar()
