@@ -61,8 +61,8 @@ def train():
 
     transforms = VitLaionPreProcess()
     train_transform = create_augmentation_transforms(transforms)
-    train_dataloader = create_dataloader_train(root='/home/ubuntu/train', transforms=train_transform, batch_size=16)
-    test_dataloader = create_dataloader_test(transforms=transforms, batch_size=16)
+    train_dataloader = create_dataloader_train(root='/home/ubuntu/training', transforms=train_transform, batch_size=16)
+    test_dataloader = create_dataloader_test(root='/home/ubuntu/testing', transforms=transforms, batch_size=16)
     validation_dataloader = create_dataloader_validation(root='/home/ubuntu/validation', transforms=transforms,
                                                          batch_size=16)
 
