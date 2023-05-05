@@ -6,7 +6,7 @@ from torch import optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from drecg.data.utils import create_dataloader_validation, create_dataloader_train, create_dataloader_test
-from drecg.feature_extraction.distributed import define_model_for_tune
+from drecg.feature_extraction.distributed import define_model_for_tune, define_model_for_tune_no_head
 from drecg.feature_extraction.utils import VitLaionPreProcess, create_augmentation_transforms
 from drecg.utils import seed_everything, create_mlflow_experiment
 import torch
@@ -52,7 +52,8 @@ def prepare_batch_fn(batch, device, non_blocking):
 
 
 def get_model(devices, microbatch_num):
-    return define_model_for_tune(devices, microbatch_num)
+    # return define_model_for_tune(devices, microbatch_num)
+    return define_model_for_tune_no_head(devices, microbatch_num)
 
 
 def train():

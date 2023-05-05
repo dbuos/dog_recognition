@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Tuple
 
 from transformers.models.clip.configuration_clip import CLIPVisionConfig
 from transformers.models.clip.modeling_clip import CLIPVisionTransformer
@@ -127,9 +127,12 @@ def define_model_for_tune(devices, microbatch_num=1):
     with open(pickle_filename, 'rb') as f:
         head_model = pickle.load(f)
 
+    return define_model(head_model, devices, microbatch_num)
+
+
+def define_model(head_model, devices, microbatch_num=1):
     feat_extractor = VitImageFeatureExtractor.load_pretrained()
     feat_extractor = feat_extractor.to_sequential()
-
     sequential_model_to_devices(feat_extractor, devices)
     feat_extractor = Pipe(feat_extractor, chunks=microbatch_num)
     head_model.to(devices[-1])  # Put the head model in the last device
@@ -148,6 +151,24 @@ def define_model_for_tune(devices, microbatch_num=1):
             return self.head((features_a, features_b))
 
     return CompleteModel(head_model, feat_extractor)
+
+
+class SimpleHead(nn.Module):
+
+    def __init__(self, features_dim=1280):
+        super().__init__()
+        self.cls_layer = nn.Linear(features_dim, 1)
+
+    def forward(self, x: Tuple[torch.Tensor, torch.Tensor]):
+        features_a, features_b = x
+        features = features_a - features_b
+        features2 = features_b - features_a
+        return (self.cls_layer(features) + self.cls_layer(features2)) / 2.0
+
+
+def define_model_for_tune_no_head(devices, microbatch_num=1):
+    head_model = SimpleHead()
+    return define_model(head_model, devices, microbatch_num)
 
 # model_to_hub = VitImageFeatureExtractor()
 # model_to_hub.visual_projection =   other_model.feature_extractor.visual_projection
